@@ -6,7 +6,7 @@ use assert_cmd::prelude::*;
 
 #[test]
 fn cli_without_argument() {
-    Command::cargo_bin(Constants::APP_NAME)
+    Command::cargo_bin(env!("CARGO_PKG_NAME"))
         .unwrap()
         .assert()
         .failure();
@@ -16,10 +16,10 @@ fn cli_without_argument() {
 fn cli_get_version() {
     let expected_output = format!(
         "{app_name} {version}\n",
-        app_name = Constants::APP_NAME,
-        version = Constants::APP_VERSION
+        app_name = env!("CARGO_PKG_NAME"),
+        version = env!("CARGO_PKG_VERSION")
     );
-    let actual_str_vec = Command::cargo_bin(Constants::APP_NAME)
+    let actual_str_vec = Command::cargo_bin(env!("CARGO_PKG_NAME"))
         .unwrap()
         .arg(Constants::COMMAND_VERSION_FLAGS)
         .ok()
@@ -31,34 +31,89 @@ fn cli_get_version() {
 }
 
 #[test]
+fn cli_invalid_get_command() {
+    Command::cargo_bin(env!("CARGO_PKG_NAME"))
+        .unwrap()
+        .args(&[Constants::SUBCOMMAND_GET])
+        .assert()
+        .failure();
+
+    Command::cargo_bin(env!("CARGO_PKG_NAME"))
+        .unwrap()
+        .args(&[Constants::SUBCOMMAND_GET, "extra", "field"])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn cli_invalid_set_command() {
+    Command::cargo_bin(env!("CARGO_PKG_NAME"))
+        .unwrap()
+        .args(&[Constants::SUBCOMMAND_SET])
+        .assert()
+        .failure();
+
+    Command::cargo_bin(env!("CARGO_PKG_NAME"))
+        .unwrap()
+        .args(&[Constants::SUBCOMMAND_SET, "missing_field"])
+        .assert()
+        .failure();
+
+    Command::cargo_bin(env!("CARGO_PKG_NAME"))
+        .unwrap()
+        .args(&[Constants::SUBCOMMAND_SET, "extra", "extra", "field"])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn cli_invalid_rm_command() {
+    Command::cargo_bin(env!("CARGO_PKG_NAME"))
+        .unwrap()
+        .args(&[Constants::SUBCOMMAND_REMOVE])
+        .assert()
+        .failure();
+
+    Command::cargo_bin(env!("CARGO_PKG_NAME"))
+        .unwrap()
+        .args(&[Constants::SUBCOMMAND_REMOVE, "extra", "field"])
+        .assert()
+        .failure();
+}
+
+#[test]
+fn cli_invalid_subcommand() {
+    Command::cargo_bin(env!("CARGO_PKG_NAME"))
+        .unwrap()
+        .args(&["unknown", "subcommand"])
+        .assert()
+        .failure();
+}
+
+#[test]
+#[ignore]
 fn cli_get_command() {}
 
 #[test]
+#[ignore]
 fn cli_set_command() {}
 
 #[test]
+#[ignore]
 fn cli_rm_command() {}
 
 #[test]
-fn cli_invalid_get_command() {}
-
-#[test]
-fn cli_invalid_set_command() {}
-
-#[test]
-fn cli_invalid_rm_command() {}
-
-#[test]
-fn cli_invalid_subcommand() {}
-
-#[test]
+#[ignore]
 fn get_stored_value() {}
 
 #[test]
+#[ignore]
 fn overwrite_value() {}
 
 #[test]
+#[ignore]
 fn get_non_existent_value() {}
 
 #[test]
+#[ignore]
 fn remove_key() {}

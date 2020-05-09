@@ -2,6 +2,7 @@
 name = "kvs"
 version = "0.1.0"
 authors = ["poppindouble <poppindouble@gmail.com>"]
+description = "Simple string kv engine."
 edition = "2018"
 
 [dependencies]

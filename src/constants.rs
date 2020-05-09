@@ -1,7 +1,3 @@
-pub const APP_NAME: &str = "kvs";
-pub const APP_VERSION: &str = "0.1.0";
-pub const APP_DESCRIPTION: &str = "Simple string kv engine.";
-
 pub const COMMAND_VERSION_FLAGS: &str = "-V";
 
 pub const SUBCOMMAND_GET: &str = "get";

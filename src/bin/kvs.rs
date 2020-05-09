@@ -1,13 +1,12 @@
 use kvs::constants as Constants;
-use kvs::store_engine::KvStore;
 
-use clap::{App, Arg, SubCommand};
+use clap::{App, Arg, SubCommand, AppSettings};
 
 fn main() {
-    let arg_matches = App::new(Constants::APP_NAME)
-        .version(Constants::APP_VERSION)
-        .author("poppindouble <poppindouble@gmail.com>")
-        .about(Constants::APP_DESCRIPTION)
+    let arg_matches = App::new(env!("CARGO_PKG_NAME"))
+        .version(env!("CARGO_PKG_VERSION"))
+        .author(env!("CARGO_PKG_AUTHORS"))
+        .about(env!("CARGO_PKG_DESCRIPTION"))
         .subcommand(
             SubCommand::with_name(Constants::SUBCOMMAND_SET)
                 .about(Constants::SUBCOMMAND_SET_DESCRIPTION)
@@ -43,24 +42,9 @@ fn main() {
         .get_matches();
 
     match arg_matches.subcommand() {
-        (Constants::SUBCOMMAND_SET, Some(arg_matches)) => {
-            match arg_matches.value_of(Constants::ARGUMENT_NAME_FOR_KEY) {
-                Some(key) => println!("{:?}", key),
-                None => unreachable!(),
-            }
-        }
-        (Constants::SUBCOMMAND_GET, Some(arg_matches)) => {
-            match arg_matches.value_of(Constants::ARGUMENT_NAME_FOR_KEY) {
-                Some(key) => println!("{:?}", key),
-                None => unreachable!(),
-            }
-        }
-        (Constants::SUBCOMMAND_REMOVE, Some(arg_matches)) => {
-            match arg_matches.value_of(Constants::ARGUMENT_NAME_FOR_KEY) {
-                Some(key) => println!("{:?}", key),
-                None => unimplemented!(),
-            }
-        }
+        (Constants::SUBCOMMAND_SET, Some(_arg_matches)) => unimplemented!(),
+        (Constants::SUBCOMMAND_GET, Some(_arg_matches)) => unimplemented!(),
+        (Constants::SUBCOMMAND_REMOVE, Some(_arg_matches)) => unimplemented!(),
         _ => unreachable!(),
     }
 }
