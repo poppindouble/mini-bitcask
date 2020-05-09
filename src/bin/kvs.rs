@@ -1,6 +1,6 @@
 use kvs::constants as Constants;
 
-use clap::{App, Arg, SubCommand, AppSettings};
+use clap::{App, Arg, SubCommand};
 
 fn main() {
     let arg_matches = App::new(env!("CARGO_PKG_NAME"))
