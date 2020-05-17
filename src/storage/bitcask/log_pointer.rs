@@ -1,10 +1,10 @@
 pub struct LogPointer {
     pub pos: u64,
-    pub len: usize,
+    pub len: u64,
 }
 
 impl LogPointer {
-    pub fn new(pos: u64, len: usize) -> LogPointer {
+    pub fn new(pos: u64, len: u64) -> LogPointer {
         LogPointer { pos, len }
     }
 }

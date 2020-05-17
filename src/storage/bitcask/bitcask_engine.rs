@@ -3,14 +3,15 @@ use std::fs::{create_dir_all, File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Result, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use crate::command::Command;
 use crate::constants::LOG_FILE_NAME;
+use crate::storage::bitcask::command::Command;
+use crate::storage::bitcask::log_pointer::LogPointer;
 use crate::utils::u8_array_to_u64;
 
 pub struct Bitcask {
-    pub reader: BitcaskReader,
+    reader: BitcaskReader,
     writer: BitcaskWriter,
-    index: HashMap<Vec<u8>, Vec<u8>>,
+    index: HashMap<Vec<u8>, LogPointer>,
 }
 
 struct BitcaskWriter {
@@ -58,7 +59,7 @@ impl Seek for BitcaskWriter {
     }
 }
 
-pub struct BitcaskReader {
+struct BitcaskReader {
     reader: BufReader<File>,
 }
 
@@ -98,37 +99,7 @@ impl Bitcask {
         let writer = BitcaskWriter::new(&log_file_dir)?;
         let mut index = HashMap::new();
 
-        let mut buffer = Vec::new();
-        reader.read_to_end(&mut buffer)?;
-
-        let mut current_pos = 0;
-
-        while current_pos as i64 <= buffer.len() as i64 - 1 {
-            let total_length_bytes = &buffer[current_pos..current_pos + 8];
-            let total_length = u8_array_to_u64(&[
-                total_length_bytes[0],
-                total_length_bytes[1],
-                total_length_bytes[2],
-                total_length_bytes[3],
-                total_length_bytes[4],
-                total_length_bytes[5],
-                total_length_bytes[6],
-                total_length_bytes[7],
-            ]);
-            let bytes = &buffer[current_pos..current_pos + total_length as usize];
-
-            let command = Command::from(bytes);
-            match command {
-                Command::Set { key, value } => {
-                    index.insert(key, value);
-                }
-                Command::Remove { key } => {
-                    index.remove(&key);
-                }
-            }
-
-            current_pos += total_length as usize;
-        }
+        load_index(&mut reader, &mut index)?;
 
         let bitcask = Bitcask {
             reader,
@@ -148,9 +119,25 @@ impl Bitcask {
         return Ok(());
     }
 
-    pub fn get(&mut self, key: Vec<u8>) -> Option<Vec<u8>> {
-        let res = self.index.get(&key)?;
-        return Some(res.clone());
+    pub fn get(&mut self, key: Vec<u8>) -> Result<Option<Vec<u8>>> {
+        let log_pointer = self.index.get(&key).unwrap();
+
+        self.reader.seek(SeekFrom::Start(log_pointer.pos))?;
+
+        let mut log_pointer_reader = self.reader.by_ref().take(log_pointer.len);
+        let mut buffer = vec![0; log_pointer.len as usize];
+        log_pointer_reader.read_exact(&mut buffer)?;
+        
+        let command = Command::from(buffer.as_slice());
+
+        match command {
+            Command::Set { key: _, value } => {
+                return Ok(Some(value));
+            }
+            Command::Remove { key: _ } => {
+                return Ok(None);
+            }
+        }
     }
 
     pub fn remove(&mut self, key: Vec<u8>) -> Result<()> {
@@ -161,6 +148,45 @@ impl Bitcask {
 
         return Ok(());
     }
+}
+
+fn load_index(reader: &mut BitcaskReader, index: &mut HashMap<Vec<u8>, LogPointer>) -> Result<()> {
+    let mut buffer = Vec::new();
+    reader.read_to_end(&mut buffer)?;
+
+    let mut current_pos = 0;
+
+    //    should use a buffer reader to deal with it
+
+    while current_pos as i64 <= buffer.len() as i64 - 1 {
+        let total_length_bytes = &buffer[current_pos..current_pos + 8];
+        let total_length = u8_array_to_u64(&[
+            total_length_bytes[0],
+            total_length_bytes[1],
+            total_length_bytes[2],
+            total_length_bytes[3],
+            total_length_bytes[4],
+            total_length_bytes[5],
+            total_length_bytes[6],
+            total_length_bytes[7],
+        ]) as usize;
+        let bytes = &buffer[current_pos..current_pos + total_length];
+
+        let command = Command::from(bytes);
+        match command {
+            Command::Set { key, value: _ } => {
+                let log_pointer = LogPointer::new(current_pos as u64, total_length as u64);
+                index.insert(key, log_pointer);
+            }
+            Command::Remove { key } => {
+                index.remove(&key);
+            }
+        }
+
+        current_pos += total_length as usize;
+    }
+
+    return Ok(());
 }
 
 fn get_log_file_dir(dir: &PathBuf) -> PathBuf {

@@ -1,7 +1,7 @@
 use std::io::Result;
 
 use kvs::constants as Constants;
-use kvs::storage::bitcask::Bitcask;
+use kvs::storage::bitcask::bitcask_engine::Bitcask;
 
 use clap::{App, Arg, SubCommand};
 use std::path::PathBuf;
@@ -67,7 +67,7 @@ fn main() -> Result<()> {
             let path = PathBuf::from(Constants::TEMP_LOG_FILE_PATH);
             let mut store_engine = Bitcask::open(&path)?;
 
-            match store_engine.get(key.as_bytes().to_vec()) {
+            match store_engine.get(key.as_bytes().to_vec())? {
                 Some(res) => {
                     println!("{:?}", String::from_utf8(res));
                 }
