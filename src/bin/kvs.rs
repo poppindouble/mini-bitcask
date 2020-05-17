@@ -1,12 +1,11 @@
-use std::io::Result;
-
 use kvs::constants as Constants;
+use kvs::error::KVResult;
 use kvs::storage::bitcask::bitcask_engine::Bitcask;
 
 use clap::{App, Arg, SubCommand};
 use std::path::PathBuf;
 
-fn main() -> Result<()> {
+fn main() -> KVResult<()> {
     let arg_matches = App::new(env!("CARGO_PKG_NAME"))
         .version(env!("CARGO_PKG_VERSION"))
         .author(env!("CARGO_PKG_AUTHORS"))

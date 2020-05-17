@@ -4,6 +4,7 @@ use std::io::{BufReader, BufWriter, Read, Result, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use crate::constants::LOG_FILE_NAME;
+use crate::error::{KVError, KVResult};
 use crate::storage::bitcask::command::Command;
 use crate::storage::bitcask::log_pointer::LogPointer;
 use crate::utils::u8_array_to_u64;
@@ -19,7 +20,7 @@ struct BitcaskWriter {
 }
 
 impl BitcaskWriter {
-    fn new(path: &PathBuf) -> Result<BitcaskWriter> {
+    fn new(path: &PathBuf) -> KVResult<BitcaskWriter> {
         let file = OpenOptions::new()
             .create(true)
             .append(true)
@@ -30,9 +31,8 @@ impl BitcaskWriter {
         return Ok(writer);
     }
 
-    fn fully_write(&mut self, buf: &mut Vec<u8>) -> Result<()> {
+    fn fully_write(&mut self, buf: &mut Vec<u8>) -> KVResult<()> {
         let mut data_len = buf.len();
-
         while data_len > 0 {
             let written = self.writer.write(&buf)?;
             *buf = buf[written..].to_vec();
@@ -90,7 +90,7 @@ impl Seek for BitcaskReader {
 }
 
 impl Bitcask {
-    pub fn open(path: &PathBuf) -> Result<Bitcask> {
+    pub fn open(path: &PathBuf) -> KVResult<Bitcask> {
         create_dir_all(&path)?;
 
         let log_file_dir = get_log_file_dir(&path);
@@ -110,39 +110,55 @@ impl Bitcask {
         return Ok(bitcask);
     }
 
-    pub fn set(&mut self, key: Vec<u8>, value: Vec<u8>) -> Result<()> {
-        let command = Command::Set { key, value };
+    pub fn set(&mut self, key: Vec<u8>, value: Vec<u8>) -> KVResult<()> {
+        let command = Command::Set { key: key.clone(), value };
         let command_bytes = command.parse();
 
+        let current_pos = self.writer.seek(SeekFrom::Current(0))?;
+        let command_bytes_len = command_bytes.len();
+
+        let log_pointer = LogPointer::new(current_pos, command_bytes_len as u64);
+
+        self.index.insert(key, log_pointer);
+
         self.writer.fully_write(&mut command_bytes.to_vec())?;
+        self.writer.flush();
 
         return Ok(());
     }
 
-    pub fn get(&mut self, key: Vec<u8>) -> Result<Option<Vec<u8>>> {
-        let log_pointer = self.index.get(&key).unwrap();
+    pub fn get(&mut self, key: Vec<u8>) -> KVResult<Option<Vec<u8>>> {
+        match self.index.get(&key) {
+            None => Err(KVError::KeyNoneExisted),
+            Some(log_pointer) => {
+                self.reader.seek(SeekFrom::Start(log_pointer.pos))?;
 
-        self.reader.seek(SeekFrom::Start(log_pointer.pos))?;
+                let mut log_pointer_reader = self.reader.by_ref().take(log_pointer.len);
 
-        let mut log_pointer_reader = self.reader.by_ref().take(log_pointer.len);
-        let mut buffer = vec![0; log_pointer.len as usize];
-        log_pointer_reader.read_exact(&mut buffer)?;
-        
-        let command = Command::from(buffer.as_slice());
+                let mut buffer = vec![0; log_pointer.len as usize];
+                log_pointer_reader.read(&mut buffer)?;
 
-        match command {
-            Command::Set { key: _, value } => {
-                return Ok(Some(value));
-            }
-            Command::Remove { key: _ } => {
-                return Ok(None);
+                let command = Command::from(buffer.as_slice());
+
+                match command {
+                    Command::Set { key: _, value } => {
+                        return Ok(Some(value));
+                    }
+                    Command::Remove { key: _ } => {
+                        return Ok(None);
+                    }
+                }
             }
         }
     }
 
-    pub fn remove(&mut self, key: Vec<u8>) -> Result<()> {
-        let command = Command::Remove { key };
+    pub fn remove(&mut self, key: Vec<u8>) -> KVResult<()> {
+        let command = Command::Remove { key: key.clone() };
         let command_bytes = command.parse();
+
+        if self.index.contains_key(&key) {
+            self.index.remove(&key);
+        }
 
         self.writer.fully_write(&mut command_bytes.to_vec())?;
 
@@ -150,7 +166,10 @@ impl Bitcask {
     }
 }
 
-fn load_index(reader: &mut BitcaskReader, index: &mut HashMap<Vec<u8>, LogPointer>) -> Result<()> {
+fn load_index(
+    reader: &mut BitcaskReader,
+    index: &mut HashMap<Vec<u8>, LogPointer>,
+) -> KVResult<()> {
     let mut buffer = Vec::new();
     reader.read_to_end(&mut buffer)?;
 
