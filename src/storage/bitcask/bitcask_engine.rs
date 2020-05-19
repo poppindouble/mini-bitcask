@@ -31,6 +31,7 @@ impl BitcaskWriter {
         return Ok(writer);
     }
 
+//    can be replaced with write_all
     fn fully_write(&mut self, buf: &mut Vec<u8>) -> KVResult<()> {
         let mut data_len = buf.len();
         while data_len > 0 {
@@ -122,7 +123,7 @@ impl Bitcask {
         self.index.insert(key, log_pointer);
 
         self.writer.fully_write(&mut command_bytes.to_vec())?;
-        self.writer.flush();
+        self.writer.flush()?;
 
         return Ok(());
     }
