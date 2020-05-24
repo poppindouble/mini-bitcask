@@ -1,18 +1,19 @@
 use std::collections::HashMap;
-use std::fs::{create_dir_all, File, OpenOptions};
+use std::fs::{create_dir_all, read_dir, File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Result, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-use crate::constants::LOG_FILE_NAME;
 use crate::error::{KVError, KVResult};
 use crate::storage::bitcask::command::Command;
 use crate::storage::bitcask::log_pointer::LogPointer;
 use crate::utils::u8_array_to_u64;
 
 pub struct Bitcask {
-    reader: BitcaskReader,
+    readers: HashMap<u64, BitcaskReader>,
     writer: BitcaskWriter,
     index: HashMap<Vec<u8>, LogPointer>,
+    current_gen: u64,
+    uncompacted: u64,
 }
 
 struct BitcaskWriter {
@@ -31,7 +32,6 @@ impl BitcaskWriter {
         return Ok(writer);
     }
 
-//    can be replaced with write_all
     fn fully_write(&mut self, buf: &mut Vec<u8>) -> KVResult<()> {
         let mut data_len = buf.len();
         while data_len > 0 {
@@ -94,31 +94,49 @@ impl Bitcask {
     pub fn open(path: &PathBuf) -> KVResult<Bitcask> {
         create_dir_all(&path)?;
 
-        let log_file_dir = get_log_file_dir(&path);
+        let sorted_gen_list = get_sorted_gen_list(&path)?;
 
-        let mut reader = BitcaskReader::new(&log_file_dir)?;
-        let writer = BitcaskWriter::new(&log_file_dir)?;
         let mut index = HashMap::new();
+        let mut readers = HashMap::new();
+        let mut uncompacted = 0;
 
-        load_index(&mut reader, &mut index)?;
+        for gen in sorted_gen_list {
+            uncompacted += load_index(gen, &path, &mut readers, &mut index)?;
+        }
+
+        let current_gen = {
+            if sorted_gen_list.is_empty() {
+                0
+            } else {
+                *sorted_gen_list.last().unwrap()
+            }
+        };
+
+        let writer_log_path = get_log_file_dir(current_gen, &path);
+        let writer = BitcaskWriter::new(&writer_log_path)?;
 
         let bitcask = Bitcask {
-            reader,
+            readers,
             writer,
             index,
+            current_gen,
+            uncompacted,
         };
 
         return Ok(bitcask);
     }
 
     pub fn set(&mut self, key: Vec<u8>, value: Vec<u8>) -> KVResult<()> {
-        let command = Command::Set { key: key.clone(), value };
+        let command = Command::Set {
+            key: key.clone(),
+            value,
+        };
         let command_bytes = command.parse();
 
         let current_pos = self.writer.seek(SeekFrom::Current(0))?;
         let command_bytes_len = command_bytes.len();
 
-        let log_pointer = LogPointer::new(current_pos, command_bytes_len as u64);
+        let log_pointer = LogPointer::new(self.current_gen, current_pos, command_bytes_len as u64);
 
         self.index.insert(key, log_pointer);
 
@@ -132,20 +150,27 @@ impl Bitcask {
         match self.index.get(&key) {
             None => Err(KVError::KeyNoneExisted),
             Some(log_pointer) => {
-                self.reader.seek(SeekFrom::Start(log_pointer.pos))?;
+                match self.readers.get(&log_pointer.gen) {
+                    Some(mut reader) => {
+                        reader.seek(SeekFrom::Start(log_pointer.pos))?;
 
-                let mut log_pointer_reader = self.reader.by_ref().take(log_pointer.len);
+                        let mut log_pointer_reader = reader.by_ref().take(log_pointer.len);
 
-                let mut buffer = vec![0; log_pointer.len as usize];
-                log_pointer_reader.read(&mut buffer)?;
+                        let mut buffer = vec![0; log_pointer.len as usize];
+                        log_pointer_reader.read(&mut buffer)?;
 
-                let command = Command::from(buffer.as_slice());
+                        let command = Command::from(buffer.as_slice());
 
-                match command {
-                    Command::Set { key: _, value } => {
-                        return Ok(Some(value));
+                        match command {
+                            Command::Set { key: _, value } => {
+                                return Ok(Some(value));
+                            }
+                            Command::Remove { key: _ } => {
+                                return Ok(None);
+                            }
+                        }
                     }
-                    Command::Remove { key: _ } => {
+                    None => {
                         return Ok(None);
                     }
                 }
@@ -157,8 +182,12 @@ impl Bitcask {
         let command = Command::Remove { key: key.clone() };
         let command_bytes = command.parse();
 
-        if self.index.contains_key(&key) {
-            self.index.remove(&key);
+        match self.index.remove(&key) {
+            Some(old_log_pointer) => {
+                self.uncompacted += old_log_pointer.len;
+                self.uncompacted += *&command_bytes.len() as u64;
+            }
+            None => {}
         }
 
         self.writer.fully_write(&mut command_bytes.to_vec())?;
@@ -167,16 +196,37 @@ impl Bitcask {
     }
 }
 
+fn get_sorted_gen_list(path: &PathBuf) -> KVResult<Vec<u64>> {
+    let mut entries: Vec<u64> = read_dir(&path)?
+        .map(|dir_entry| Ok(dir_entry?.path()))
+        .filter(|path| {})
+        .map(|entry| {
+            let file_name = entry.file_name().into_string()?;
+            let gen = file_name.parse::<u64>()?;
+            return gen;
+        })
+        .collect();
+
+    entries.sort();
+
+    return Ok(entries);
+}
+
 fn load_index(
-    reader: &mut BitcaskReader,
+    gen: u64,
+    path: &PathBuf,
+    readers: &mut HashMap<u64, BitcaskReader>,
     index: &mut HashMap<Vec<u8>, LogPointer>,
-) -> KVResult<()> {
+) -> KVResult<u64> {
+    let mut uncompacted = 0;
+    let log_path = get_log_file_dir(gen, &path);
+    let mut reader = BitcaskReader::new(&log_path)?;
+    readers.insert(gen, reader);
+
     let mut buffer = Vec::new();
     reader.read_to_end(&mut buffer)?;
 
     let mut current_pos = 0;
-
-    //    should use a buffer reader to deal with it
 
     while current_pos as i64 <= buffer.len() as i64 - 1 {
         let total_length_bytes = &buffer[current_pos..current_pos + 8];
@@ -195,22 +245,27 @@ fn load_index(
         let command = Command::from(bytes);
         match command {
             Command::Set { key, value: _ } => {
-                let log_pointer = LogPointer::new(current_pos as u64, total_length as u64);
-                index.insert(key, log_pointer);
+                let log_pointer = LogPointer::new(gen, current_pos as u64, total_length as u64);
+                if let Some(old_log_pointer) = index.insert(key, log_pointer) {
+                    uncompacted += old_log_pointer.len;
+                }
             }
             Command::Remove { key } => {
-                index.remove(&key);
+                if let Some(old_log_pointer) = index.remove(&key) {
+                    uncompacted += old_log_pointer.len;
+                }
+                uncompacted += total_length as u64;
             }
         }
 
         current_pos += total_length as usize;
     }
 
-    return Ok(());
+    return Ok(uncompacted);
 }
 
-fn get_log_file_dir(dir: &PathBuf) -> PathBuf {
-    let log_file_name = format!("{}.log", LOG_FILE_NAME);
+fn get_log_file_dir(gen: u64, dir: &PathBuf) -> PathBuf {
+    let log_file_name = format!("{}.log", gen);
     let log_path = dir.join(Path::new(&log_file_name));
     return log_path;
 }

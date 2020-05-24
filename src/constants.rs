@@ -17,5 +17,3 @@ pub const MISSING_VALUE_ARGUMENT_MESSAGE: &str = "VALUE argument missing";
 pub const MISSING_KEY_MESSAGE: &str = "Key not existed";
 
 pub const TEMP_LOG_FILE_PATH: &str = "/tmp";
-
-pub const LOG_FILE_NAME: &str = "command_log";
