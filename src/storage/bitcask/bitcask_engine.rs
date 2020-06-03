@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::fs::{create_dir_all, read_dir, File, OpenOptions};
+use std::fs::{create_dir_all, read_dir, File, OpenOptions, DirEntry};
 use std::io::{BufReader, BufWriter, Read, Result, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
@@ -100,8 +100,8 @@ impl Bitcask {
         let mut readers = HashMap::new();
         let mut uncompacted = 0;
 
-        for gen in sorted_gen_list {
-            uncompacted += load_index(gen, &path, &mut readers, &mut index)?;
+        for gen in &sorted_gen_list {
+            uncompacted += load_index(*gen, &path, &mut readers, &mut index)?;
         }
 
         let current_gen = {
@@ -131,6 +131,7 @@ impl Bitcask {
             key: key.clone(),
             value,
         };
+
         let command_bytes = command.parse();
 
         let current_pos = self.writer.seek(SeekFrom::Current(0))?;
@@ -150,8 +151,8 @@ impl Bitcask {
         match self.index.get(&key) {
             None => Err(KVError::KeyNoneExisted),
             Some(log_pointer) => {
-                match self.readers.get(&log_pointer.gen) {
-                    Some(mut reader) => {
+                match self.readers.get_mut(&log_pointer.gen) {
+                    Some(reader) => {
                         reader.seek(SeekFrom::Start(log_pointer.pos))?;
 
                         let mut log_pointer_reader = reader.by_ref().take(log_pointer.len);
@@ -197,19 +198,33 @@ impl Bitcask {
 }
 
 fn get_sorted_gen_list(path: &PathBuf) -> KVResult<Vec<u64>> {
-    let mut entries: Vec<u64> = read_dir(&path)?
-        .map(|dir_entry| Ok(dir_entry?.path()))
-        .filter(|path| {})
-        .map(|entry| {
-            let file_name = entry.file_name().into_string()?;
-            let gen = file_name.parse::<u64>()?;
-            return gen;
-        })
-        .collect();
+    let x = read_dir(&path)?;
 
-    entries.sort();
+    let res: Vec<u64> = x.map(|yo| {
+//        return Ok(yo?.path());
+        return yo?.path().to_string_lossy().parse::<i32>();
+    }).filter_map(|ff| Result::ok)
+        .map(|j| {
+        return 3;
+    }).collect();
 
-    return Ok(entries);
+
+    let s = vec![0];
+    return Ok(s);
+
+//    let mut entries: Vec<u64> = read_dir(&path)?
+//        .map(|maybe_dir_entry| Ok(maybe_dir_entry?))
+//        .filter(|dir_entry| {})
+//        .map(|entry| {
+//            let file_name = entry.file_name().into_string()?;
+//            let gen = file_name.parse::<u64>()?;
+//            return gen;
+//        })
+//        .collect();
+//
+//    entries.sort();
+//
+//    return Ok(entries);
 }
 
 fn load_index(
@@ -221,7 +236,6 @@ fn load_index(
     let mut uncompacted = 0;
     let log_path = get_log_file_dir(gen, &path);
     let mut reader = BitcaskReader::new(&log_path)?;
-    readers.insert(gen, reader);
 
     let mut buffer = Vec::new();
     reader.read_to_end(&mut buffer)?;
@@ -260,6 +274,8 @@ fn load_index(
 
         current_pos += total_length as usize;
     }
+
+    readers.insert(gen, reader);
 
     return Ok(uncompacted);
 }
